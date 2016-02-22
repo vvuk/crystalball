@@ -7,6 +7,7 @@ const EventEmitter = require('events');
 const request = require('request');
 const JSONStream = require('JSONStream');
 const es = require('event-stream');
+const Stream = require('stream');
 
 function
 parse_version_into(doc, vbase, vstr)
@@ -127,7 +128,7 @@ loadDataSuperSearchURL(ssurl, offset, outputStream)
   console.time("loadDataSuperSearchURL " + requrl);
 
   outputStream = outputStream ||
-    es.mapSync(function (doc) {
+    new es.mapSync(function (doc) {
       parse_version_into(doc, "v", doc['version']);
       parse_os_version_into(doc, doc['platform'], "pv", doc['platform_version']);
       parse_app_notes_into(doc, doc['platform'], doc['app_notes']);
@@ -181,7 +182,7 @@ loadDataCSV(csvfile)
 
   let col = null;
   let lineParser =
-    es.map(function(r, callback) {
+    new es.map(function(r, callback) {
       // first row? headers, then skip
       if (col == null) {
         col = {};
@@ -211,6 +212,7 @@ loadDataCSV(csvfile)
         doc['version'] = r[col['version']];
         doc['crash_date'] = r[col['client_crash_date']].substr(0, 8);
         doc['crash_time'] = r[col['client_crash_date']].substr(8);
+        doc['release_channel'] = r[col['release_channel']];
 
         parse_version_into(doc, "v", r[col['version']]);
         parse_os_version_into(doc, osname, "pv", r[col['os_version']]);
@@ -236,6 +238,7 @@ loadDataCSV(csvfile)
 let args = [];
 let curArg = 0;
 let sinkStream = null;
+
 function readNextStream() {
   if (curArg == args.length) {
     if (sinkStream) {
@@ -254,9 +257,7 @@ function readNextStream() {
   }
   if (sinkStream) {
     // map just the data over
-    s.pipe(es.mapSync(function(r) {
-             sinkStream.emit('data', r);
-           }));
+    s.pipe(sinkStream, {end: false});
   }
 }
 
@@ -270,8 +271,8 @@ exports.loadAllData = loadAllData;
 
 if (require.main === module) {
   let k = 0;
-  let testSink = es.mapSync(function (data) {
-                   //if (k == 2) console.log(data);
+  let testSink = es.mapSync(function (d) {
+                   if (k == 2) console.log(d);
                    k++;
                  });
   testSink.on('end', function() { console.log("Sinkstream end"); });
