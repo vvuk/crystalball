@@ -2,16 +2,36 @@
 const importData = require('./import-data.js');
 const sift = require('sift');
 const es = require('event-stream');
+const cmdline = require('command-line-args');
+const jsonfile = require('jsonfile');
 
 let topCrashes = {};
+let buckets = null;
 
 function doQueries(recs) {
+  if (buckets) {
+    for (let bucket of buckets) {
+      let matched = recs.filter(bucket._sifter);
+      for (let m of matched) {
+        m._weight = bucket._weight;
+      }
+    }
+  }
+
   for (let rec of recs) {
     let sig = rec['signature'];
-    if (sig in topCrashes) {
-      topCrashes[sig]++;
+    let w = rec._weight;
+    if (buckets) {
+      if (!w)
+        continue;
     } else {
-      topCrashes[sig] = 1;
+      w = 1;
+    }
+
+    if (sig in topCrashes) {
+      topCrashes[sig] += w;
+    } else {
+      topCrashes[sig] = w;
     }
   }
 }
@@ -54,9 +74,42 @@ handlingStream.on('end', function() {
   printReport();
 });
 
-let args = process.argv.slice(2);
-if (args.length == 0) {
-  args = ["data/2015-12-01.csv.gz"];
+if (require.main == module) {
+  let cli = cmdline([
+    { name: 'weights', alias: 'w', type: String },
+    { name: 'buckets', alias: 'b', type: String },
+    { name: 'src', ailas: 's', type: String, multiple: true, defaultOption: true }
+  ]);
+
+  const opts = cli.parse();
+  let args = opts["src"];
+  if (!args || args.length == 0) {
+    args = ["data/2015-12-01.csv.gz"];
+  }
+
+  if (opts['weights'] && opts['buckets']) {
+    let bdata = require(opts['buckets']);
+    buckets = bdata.buckets;
+
+    let weightData = jsonfile.readFileSync(opts['weights']);
+    let weightsByName = {};
+    for (let w of weightData) {
+      weightsByName[w['name']] = w['weight'];
+    }
+
+    for (let bucket of buckets) {
+      if (!bucket._sifter) {
+        bucket._sifter = sift(bucket.query);
+      }
+      if (!(bucket['name'] in weightsByName)) {
+        console.error("Can't find weight for bucket", bucket['name']);
+        throw "Failed";
+      }
+
+      bucket._weight = weightsByName[bucket['name']];
+    }
+  }
+
+  importData.loadAllData(args, handlingStream);
 }
 
-importData.loadAllData(args, handlingStream);

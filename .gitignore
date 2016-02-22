@@ -8,3 +8,4 @@ data/
 isolate-*
 bin/
 obj/
+*.json
