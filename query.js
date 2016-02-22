@@ -1,56 +1,52 @@
 "use strict";
 const importData = require('./import-data.js');
 const buckets = require('./buckets.js');
-const ForerunnerDB = require("forerunnerdb");
+const sift = require('sift');
 const es = require('event-stream');
 
 let totalCount = 0;
 
-function doQueries(coll) {
+function doQueries(recs) {
   let r;
 
   for (let bucket of buckets.buckets) {
-    bucket.count = bucket.count || 0;
-    bucket.count += coll.count(bucket.query);
+    if (!bucket._sifter) {
+      bucket._sifter = sift(bucket.query);
+    }
+
+    bucket._count = bucket._count || 0;
+    bucket._count += recs.filter(bucket._sifter).length;
   }
-  totalCount += coll.count();
+  totalCount += recs.length;
 }
 
 function printReport() {
   console.log("Total records", totalCount);
   for (let bucket of buckets.buckets) {
-    console.log(bucket.name, bucket.count, (bucket.count * 100 / totalCount).toFixed(2) + "%");
+    console.log(bucket.name, bucket._count, (bucket._count * 100 / totalCount).toFixed(2) + "%");
   }
 }
 
-let fdb = new ForerunnerDB();
-let db = fdb.db("crystalball");
-
 let recordCount = 0;
-let collection = db.collection("crash_data" /*, { primaryKey: "uuid" }*/);
-const NUM_RECORDS = 500;
+let records = [];
+const NUM_RECORDS = 5000;
 
 let handlingStream = es.mapSync(
   function (d) {
-    console.log(d['release_channel']);
+    if (d['build_id'] != "20151029151421")
+      return;
     //if (d['release_channel'] != 'release')
     //  return;
 
     if (recordCount > 0 && (recordCount % NUM_RECORDS) == 0) {
-      doQueries(collection);
-      collection.drop();
-      collection = db.collection("crash_data" /*, { primaryKey: "uuid" }*/);
+      doQueries(records);
+      records = [];
     }
-    let result = collection.insert(d);
-    if (result.failed.length > 0) {
-      console.log(result);
-    }
+    records.push(d);
     recordCount++;
   });
 handlingStream.on('end', function() {
-  doQueries(collection);
-  collection.drop();
-
+  doQueries(records);
   printReport();
 });
 
