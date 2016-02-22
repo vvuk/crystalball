@@ -10,6 +10,7 @@ let totalCount = 0;
 let matchedCount = 0;
 let outFile = null;
 let outFileUpdate = false;
+let channelSelector = null;
 
 function doQueries(recs) {
   let r;
@@ -114,10 +115,8 @@ const NUM_RECORDS = 5000;
 
 let handlingStream = es.mapSync(
   function (d) {
-    if (d['build_id'] != "20151029151421")
+    if (channelSelector && d['release_channel'] != channelSelector)
       return;
-    //if (d['release_channel'] != 'release')
-    //  return;
 
     if (recordCount > 0 && (recordCount % NUM_RECORDS) == 0) {
       doQueries(records);
@@ -135,6 +134,7 @@ if (require.main == module) {
   let cli = cmdline([
     { name: 'out', alias: 'o', type: String },
     { name: 'update', alias: 'u', type: Boolean },
+    { name: 'channel', alias: 'c', type: String },
     { name: 'in', ailas: 'i', type: String, multiple: true, defaultOption: true }
   ]);
 
@@ -145,6 +145,7 @@ if (require.main == module) {
   }
   outFile = opts["out"];
   outFileUpdate = opts["update"];
+  channelSelector = opts["channel"];
 
   importData.loadAllData(args, handlingStream);
 }

@@ -7,18 +7,32 @@ const jsonfile = require('jsonfile');
 
 let topCrashes = {};
 let buckets = null;
+let channelSelector = null;
 
 function doQueries(recs) {
   if (buckets) {
     for (let bucket of buckets) {
       let matched = recs.filter(bucket._sifter);
       for (let m of matched) {
-        m._weight = bucket._weight;
+        if (channelSelector && rec['release_channel'] != channelSelector)
+          continue;
+
+        let w = bucket._weight;
+        let sig = m['signature'];
+
+        if (sig in topCrashes) {
+          topCrashes[sig] += w;
+        } else {
+          topCrashes[sig] = w;
+        }
       }
     }
   }
 
   for (let rec of recs) {
+    if (channelSelector && rec['release_channel'] != channelSelector)
+      continue;
+
     let sig = rec['signature'];
     let w = rec._weight;
     if (buckets) {
@@ -47,7 +61,7 @@ function printReport() {
   });
 
   for (let i = 0; i < 15; ++i) {
-    console.log(crashArray[i].count, crashArray[i].sig);
+    console.log(crashArray[i].count.toFixed(2), crashArray[i].sig);
   }
 }
 
@@ -78,6 +92,7 @@ if (require.main == module) {
   let cli = cmdline([
     { name: 'weights', alias: 'w', type: String },
     { name: 'buckets', alias: 'b', type: String },
+    { name: 'channel', alias: 'c', type: String },
     { name: 'src', ailas: 's', type: String, multiple: true, defaultOption: true }
   ]);
 
@@ -86,27 +101,35 @@ if (require.main == module) {
   if (!args || args.length == 0) {
     args = ["data/2015-12-01.csv.gz"];
   }
+  channelSelector = opts["channel"];
 
-  if (opts['weights'] && opts['buckets']) {
+  if (opts['buckets']) {
     let bdata = require(opts['buckets']);
     buckets = bdata.buckets;
 
-    let weightData = jsonfile.readFileSync(opts['weights']);
-    let weightsByName = {};
-    for (let w of weightData) {
-      weightsByName[w['name']] = w['weight'];
+    let weightsByName = null;
+    if (opts['weights']) {
+      let weightData = jsonfile.readFileSync(opts['weights']);
+      weightsByName = {};
+      for (let w of weightData) {
+        weightsByName[w['name']] = w['weight'];
+      }
     }
 
     for (let bucket of buckets) {
       if (!bucket._sifter) {
         bucket._sifter = sift(bucket.query);
       }
-      if (!(bucket['name'] in weightsByName)) {
-        console.error("Can't find weight for bucket", bucket['name']);
-        throw "Failed";
-      }
+      if (weightsByName) {
+        if (!(bucket['name'] in weightsByName)) {
+          console.error("Can't find weight for bucket", bucket['name']);
+          throw "Failed";
+        }
 
-      bucket._weight = weightsByName[bucket['name']];
+        bucket._weight = weightsByName[bucket['name']];
+      } else {
+        bucket._weight = 1;
+      }
     }
   }
 
