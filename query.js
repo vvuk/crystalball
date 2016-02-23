@@ -115,7 +115,7 @@ const NUM_RECORDS = 5000;
 
 let handlingStream = es.mapSync(
   function (d) {
-    if (channelSelector && d['release_channel'] != channelSelector)
+    if (channelSelector && d['channel'] != channelSelector)
       return;
 
     if (recordCount > 0 && (recordCount % NUM_RECORDS) == 0) {

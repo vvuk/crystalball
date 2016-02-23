@@ -21,6 +21,9 @@ function makeWeights(outFile, fromFile, toFile)
     }
 
     let weight = fb.percentMatched / tb.percentMatched;
+    if (tb.percentMatched == 0 || fb.percentMatched == 0) {
+      weight = 0.0001; // small, but not Infinity or zero
+    }
     bucketWeights.push({ name: tb.name, weight: weight });
     console.log(weight, tb.name);
   }

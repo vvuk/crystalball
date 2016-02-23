@@ -14,7 +14,7 @@ function doQueries(recs) {
     for (let bucket of buckets) {
       let matched = recs.filter(bucket._sifter);
       for (let m of matched) {
-        if (channelSelector && rec['release_channel'] != channelSelector)
+        if (channelSelector && m['channel'] != channelSelector)
           continue;
 
         let w = bucket._weight;
@@ -30,7 +30,7 @@ function doQueries(recs) {
   }
 
   for (let rec of recs) {
-    if (channelSelector && rec['release_channel'] != channelSelector)
+    if (channelSelector && rec['channel'] != channelSelector)
       continue;
 
     let sig = rec['signature'];
@@ -71,11 +71,6 @@ const NUM_RECORDS = 5000;
 
 let handlingStream = es.mapSync(
   function (d) {
-    //if (d['build_id'] != "20151029151421")
-    //  return;
-    //if (d['release_channel'] != 'release')
-    //  return;
-
     if (recordCount > 0 && (recordCount % NUM_RECORDS) == 0) {
       doQueries(records);
       records = [];

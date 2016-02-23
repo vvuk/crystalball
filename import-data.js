@@ -142,9 +142,9 @@ loadDataSuperSearchURL(ssurl, offset, outputStream)
       parse_app_notes_into(doc, doc['platform'], doc['app_notes']);
 
       var docstr = doc['date'];
-      doc['crash_date'] = docstr.substr(0, 10).replace(/-/g, "");
-      doc['crash_time'] = docstr.substr(11, 8).replace(/:/g, "");
-      delete doc['date'];
+      doc['date'] = docstr.substr(0, 10).replace(/-/g, "");
+      doc['channel'] = doc['release_channel'];
+      delete doc['release_channel'];
 
       //console.log(doc);
       //console.log("====");
@@ -275,17 +275,16 @@ loadDataCSVStream(csvStream)
         let osname = r[col['os_name']];
         doc['platform'] = osname;
         doc['app_notes'] = r[col['app_notes']];
-        doc['platform_version'] = r[col['os_version']];
+        parse_os_version_into(doc, osname, "pv", r[col['os_version']]);
         doc['version'] = r[col['version']];
-        doc['crash_date'] = r[col['client_crash_date']].substr(0, 8);
-        doc['crash_time'] = r[col['client_crash_date']].substr(8);
-        doc['release_channel'] = r[col['release_channel']];
+        doc['date'] = r[col['date_processed']].substr(0, 8);
+        doc['channel'] = r[col['release_channel']];
 
         parse_version_into(doc, "v", r[col['version']]);
         parse_os_version_into(doc, osname, "pv", r[col['os_version']]);
         parse_app_notes_into(doc, osname, r[col['app_notes']]);
       } catch (e) {
-        console.error("Failed parsing crash with uuid_url ", r[col['uuid_url']]);
+        console.error("Failed parsing crash with uuid ", r[col['crash_id']]);
         console.error(e);
         console.error(e.stack);
       }
@@ -313,8 +312,6 @@ function readNextStream() {
     }
     return;
   }
-
-  console.log(arg);
 
   let s;
   if (arg.indexOf("http") == 0) {
