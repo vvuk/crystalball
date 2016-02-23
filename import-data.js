@@ -9,6 +9,14 @@ const JSONStream = require('JSONStream');
 const es = require('event-stream');
 const Stream = require('stream');
 
+let apikey = null;
+try {
+  apikey = require('./apikey.js').apikey;
+} catch (e) {
+}
+
+let cacheDir = "cache";
+
 function
 parse_version_into(doc, vbase, vstr)
 {
@@ -164,15 +172,74 @@ loadDataSuperSearchURL(ssurl, offset, outputStream)
 }
 
 function
+expandDateString(datearg)
+{
+  let datestrings = [];
+  let m = datearg.match(/^([0-9][0-9][0-9][0-9])-([0-9][0-9])(-([0-9][0-9]))?$/);
+  if (m[4]) {
+    // a specific day was given
+    datestrings.push(datearg);
+  } else {
+    // a month, loop through the dates
+    let d = new Date(datearg + "-01 PST");
+    let startMonth = d.getMonth();
+    while (d.getMonth() == startMonth) {
+      datestrings.push(d.getFullYear() + "-" +
+                       (d.getMonth() < 9 ? "0" : "") + (d.getMonth()+1) + "-" +
+                       (d.getDate() < 10 ? "0" : "") + d.getDate());
+      d.setDate(d.getDate() + 1);
+    }
+  }
+  return datestrings;
+}
+
+function
+loadDataCSVQueryDate(datearg, outputStream)
+{
+  let csvURLBase = "https://crash-stats.mozilla.com/graphics_report/?date=";
+  let reqOpts = { url: csvURLBase + datearg,
+                  gzip: true };
+  if (apikey) {
+    reqOpts['headers'] = { "Auth-Token": apikey };
+  }
+
+  if (cacheDir) {
+    let path = cacheDir + "/" + datearg + ".csv.gz";
+    try {
+      fs.accessSync(path);
+      // exists
+      let s = fs.createReadStream(path);
+      console.log(reqOpts.url + " (cached)");
+      return loadDataCSVStream(s.pipe(zlib.createGunzip()));
+    } catch (e) {
+    }
+  }
+
+  console.log(reqOpts.url);
+  let r = request(reqOpts);
+  if (cacheDir) {
+    let path = cacheDir + "/" + datearg + ".csv.gz";
+    r.pipe(zlib.createGzip()).pipe(fs.createWriteStream(path));
+  }
+  return loadDataCSVStream(r);
+}
+
+function
 loadDataCSV(csvfile)
 {
-  console.time("loadDataCSV " + csvfile);
-
   let csvStream = fs.createReadStream(csvfile);
   if (csvfile.indexOf(".gz") != -1) {
     let gunzip = zlib.createGunzip();
     csvStream = csvStream.pipe(gunzip);
   }
+
+  return loadDataCSVStream(csvStream);
+}
+
+function
+loadDataCSVStream(csvStream)
+{
+  console.time("loadDataCSV");
 
   let parser = csv.parse({delimiter: '\t'});
 
@@ -202,7 +269,7 @@ loadDataCSV(csvfile)
 
       try {
         doc['signature'] = r[col['signature']];
-        doc['uuid'] = r[col['uuid_url']].substr(r[col['uuid_url']].lastIndexOf("/") + 1);
+        doc['uuid'] = r[col['crash_id']];
         doc['build_id'] = r[col['build']];
 
         let osname = r[col['os_name']];
@@ -230,39 +297,55 @@ loadDataCSV(csvfile)
          .pipe(parser)
          .pipe(lineParser)
          .on('end', function() {
-           console.timeEnd("loadDataCSV " + csvfile);
+           console.timeEnd("loadDataCSV");
            //lineParser.emit('end');
          });
 }
 
 let args = [];
-let curArg = 0;
 let sinkStream = null;
 
 function readNextStream() {
-  if (curArg == args.length) {
+  let arg = args.shift();
+  if (!arg) {
     if (sinkStream) {
       sinkStream.emit('end');
     }
     return;
   }
 
-  var arg = args[curArg++];
   console.log(arg);
+
   let s;
   if (arg.indexOf("http") == 0) {
-    s = loadDataSuperSearchURL(arg).on('end', readNextStream);
+    s = loadDataSuperSearchURL(arg);
+  } else if (arg.match(/^[0-9][0-9][0-9][0-9]-[0-9][0-9](-[0-9][0-9])?$/)) {
+    s = loadDataCSVQueryDate(arg);
   } else {
-    s = loadDataCSV(arg).on('end', readNextStream);
+    s = loadDataCSV(arg);
   }
+
+  s.on('end', readNextStream);
+
   if (sinkStream) {
     // map just the data over
     s.pipe(sinkStream, {end: false});
   }
 }
 
-function loadAllData(files, destStream) {
-  args = files;
+function loadAllData(dataSources, destStream, cacheDirArg) {
+  args = [];
+  for (let arg of dataSources) {
+    if (arg.match(/^[0-9][0-9][0-9][0-9]-[0-9][0-9](-[0-9][0-9])?$/)) {
+      args = args.concat(expandDateString(arg));
+    } else {
+      args.push(arg);
+    }
+  }
+
+  if (cacheDirArg) {
+    cacheDir = cacheDirArg;
+  }
   sinkStream = destStream;
   readNextStream();
 }
