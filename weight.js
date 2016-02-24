@@ -1,11 +1,15 @@
 "use strict";
-const cmdline = require('command-line-args');
-const jsonfile = require('jsonfile');
-
-function makeWeights(outFile, fromFile, toFile)
+function makeWeights(bucketCountData, fromChannel, toChannel)
 {
-  let fromBuckets = jsonfile.readFileSync(fromFile);
-  let toBuckets = jsonfile.readFileSync(toFile);
+  let fromBuckets = bucketCountData[fromChannel];
+  let toBuckets = bucketCountData[toChannel];
+
+  if (!fromBuckets) {
+    throw new Error("Can't find channel '" + fromChannel + "' in bucket count data");
+  }
+  if (!toBuckets) {
+    throw new Error("Can't find channel '" + toChannel + "' in bucket count data");
+  }
 
   let fromBucketsByName = {};
   for (let fb of fromBuckets.buckets) {
@@ -16,8 +20,7 @@ function makeWeights(outFile, fromFile, toFile)
   for (let tb of toBuckets.buckets) {
     let fb = fromBucketsByName[tb.name];
     if (!fb) {
-      console.error("Couldn't find from bucket", tb.name);
-      return;
+      throw new Error("Couldn't find from bucket " + tb.name);
     }
 
     let weight = fb.percentMatched / tb.percentMatched;
@@ -25,25 +28,24 @@ function makeWeights(outFile, fromFile, toFile)
       weight = 0.0001; // small, but not Infinity or zero
     }
     bucketWeights.push({ name: tb.name, weight: weight });
-    console.log(weight, tb.name);
   }
-
-  jsonfile.writeFile(outFile, bucketWeights);
-  console.log("Wrote", outFile);
+  return bucketWeights;
 }
 
-if (require.main == module) {
-  let cli = cmdline([
-    { name: 'out', alias: 'o', type: String },
-    { name: 'src', ailas: 's', type: String, multiple: true, defaultOption: true }
-  ]);
+module.exports.makeWeights = makeWeights;
 
-  const opts = cli.parse();
-  let args = opts["src"];
-  if (args.length != 2) {
-    console.error("Usage: weight.js -o weights.json from-data.json to-data.json");
+if (require.main == module) {
+  const jsonfile = require('jsonfile');
+
+  let args = process.argv.slice(2);
+  if (args.length != 3) {
+    console.error("Usage: weight.js bucketcounts.json fromChannel toChannel");
     return;
   }
 
-  makeWeights(opts["out"], args[0], args[1]);
+  let bucketCounts = jsonfile.readFileSync(args[0]);
+  let weights = makeWeights(bucketCounts, args[1], args[2]);
+  for (let w of weights) {
+    console.log(w.weight.toFixed(3), w.name);
+  }
 }

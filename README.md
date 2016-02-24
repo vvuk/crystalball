@@ -7,22 +7,29 @@
 4. Figure out how to parallelize -- all steps could easily be parallel per day with a marge step
 5. Add usage/command line arg info to all commands
 
+## Setup
+```npm install```
 
 ## Example usage
 
 Create `apikey.js` with `module.exports.apikey = "...";`.
 
-Count all release crashes in buckets
-    $ node ./query.js -o out/2016-01-release-buckets.json -c release 2016-01
+Count all bucketed crashes for 2016-01, using bucket definitions in `buckets.js`.  Write output to `out/2016-01-bucket-counts.json`.
+```
+$ node ./bucket-count.js -b ./buckets.js -o out/2016-01-bucket-counts.json 2016-01
+```
 
-Do the same for beta crashes
-    $ node ./query.js -o out/2016-01-beta-buckets.json -c beta 2016-01
+Compute overall beta topcrashes
+```
+$ node ./topcrash.js -c beta 2016-01
+```
+    
+Compute beta topcrashes, ignoring crashes that don't match a bucket
+```
+$ node ./topcrash.js -b ./buckets.js -c beta 2016-01
+```
 
-Compute weights to project beta onto release
-    $ node ./weight.js -o out/2016-01-beta-to-release-weights.json out/2016-01-release-buckets.json out/2016-01-beta-buckets.json
-
-Compute beta topcrashes
-    $ node ./topcrash.js -b ./buckets.js -c beta 2016-01
-
-Compute beta topcrashes, with weights applied
-    $ node ./topcrash.js -w out/2016-01-beta-to-release-weights.json -b ./buckets.js -c beta 2016-01
+Compute beta topcrashes, as if it was the release population.  (`-b` bucket file; `-f` bucket count file; `-c` channel; `-m` map channel)
+```
+$ node ./topcrash.js -b ./buckets.js -f out/2016-01-bucket-counts.json -c beta -m release 2016-01
+```

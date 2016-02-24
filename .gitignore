@@ -10,3 +10,4 @@ bin/
 obj/
 *.json
 apikey.js
+cache/*
