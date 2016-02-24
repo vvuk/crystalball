@@ -1,11 +1,11 @@
 "use strict";
 const importData = require('./import-data.js');
-const buckets = require('./buckets.js');
 const sift = require('sift');
 const es = require('event-stream');
 const cmdline = require('command-line-args');
 const jsonfile = require('jsonfile');
 
+let buckets = null;
 let totalCount = 0;
 let matchedCount = 0;
 let outFile = null;
@@ -15,7 +15,7 @@ let channelSelector = null;
 function doQueries(recs) {
   let r;
 
-  for (let bucket of buckets.buckets) {
+  for (let bucket of buckets) {
     if (!bucket._sifter) {
       bucket._sifter = sift(bucket.query);
     }
@@ -31,7 +31,7 @@ function doQueries(recs) {
 
 function printReport() {
   console.log("Total records", totalCount);
-  for (let bucket of buckets.buckets) {
+  for (let bucket of buckets) {
     console.log(bucket.name, bucket._count, (bucket._count * 100 / totalCount).toFixed(2) + "%");
   }
 
@@ -54,7 +54,7 @@ function printReport() {
     };
 
     let bucketsByName = {};
-    for (let bucket of buckets.buckets) {
+    for (let bucket of buckets) {
       let c = bucket._count || 0;
       let b = {
         name: bucket.name,
@@ -135,17 +135,31 @@ if (require.main == module) {
     { name: 'out', alias: 'o', type: String },
     { name: 'update', alias: 'u', type: Boolean },
     { name: 'channel', alias: 'c', type: String },
+    { name: 'buckets', alias: 'b', type: String },
     { name: 'in', ailas: 'i', type: String, multiple: true, defaultOption: true }
   ]);
 
   const opts = cli.parse();
   let args = opts["in"];
-  if (args.length == 0) {
-    args = ["data/2015-12-01.csv.gz"];
-  }
   outFile = opts["out"];
   outFileUpdate = opts["update"];
   channelSelector = opts["channel"];
+
+  let bucketModule = opts["buckets"];
+  if (bucketModule) {
+    if (bucketModule.indexOf("/") == -1) {
+      bucketModule = "./" + bucketModule;
+    }
+  } else {
+    console.log("Using ./buckets.js");
+    bucketModule = "./buckets.js";
+  }
+
+  buckets = require(bucketModule).buckets;
+
+  if (!args || args.length == 0) {
+    args = ["2016-01-01"];
+  }
 
   importData.loadAllData(args, handlingStream);
 }

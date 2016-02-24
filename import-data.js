@@ -349,6 +349,10 @@ function loadAllData(dataSources, destStream, cacheDirArg) {
 
 exports.loadAllData = loadAllData;
 
+/*
+ * For testing -- if this script is ran directly, it will just process
+ * all args
+ */
 if (require.main === module) {
   let k = 0;
   let testSink = es.mapSync(function (d) {

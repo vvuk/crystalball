@@ -98,9 +98,15 @@ if (require.main == module) {
   }
   channelSelector = opts["channel"];
 
-  if (opts['buckets']) {
-    let bdata = require(opts['buckets']);
-    buckets = bdata.buckets;
+  let bucketModule = opts["buckets"];
+  if (bucketModule) {
+    if (bucketModule.indexOf("/") == -1) {
+      bucketModule = "./" + bucketModule;
+    }
+  }
+
+  if (bucketModule) {
+    buckets = require(bucketModule).buckets;
 
     let weightsByName = null;
     if (opts['weights']) {
