@@ -1,8 +1,8 @@
 "use strict";
-function makeWeights(bucketCountData, fromChannel, toChannel)
+function makeWeights(fromBucketCountData, fromChannel, toBucketCountData, toChannel)
 {
-  let fromBuckets = bucketCountData[fromChannel];
-  let toBuckets = bucketCountData[toChannel];
+  let fromBuckets = fromBucketCountData[fromChannel];
+  let toBuckets = toBucketCountData[toChannel];
 
   if (!fromBuckets) {
     throw new Error("Can't find channel '" + fromChannel + "' in bucket count data");
@@ -38,14 +38,16 @@ if (require.main == module) {
   const jsonfile = require('jsonfile');
 
   let args = process.argv.slice(2);
-  if (args.length != 3) {
-    console.error("Usage: weight.js bucketcounts.json fromChannel toChannel");
+  if (args.length != 5) {
+    console.error("Usage: weight.js fromBucketCounts.json fromChannel toBucketCounts.json toChannel weightsOut.json");
     return;
   }
 
-  let bucketCounts = jsonfile.readFileSync(args[0]);
-  let weights = makeWeights(bucketCounts, args[1], args[2]);
+  let fromBucketCounts = jsonfile.readFileSync(args[0]);
+  let toBucketCounts = jsonfile.readFileSync(args[2]);
+  let weights = makeWeights(fromBucketCounts, args[1], toBucketCounts, args[3]);
   for (let w of weights) {
     console.log(w.weight.toFixed(3), w.name);
   }
+  jsonfile.writeFileSync(args[4], weights);
 }

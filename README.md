@@ -33,3 +33,14 @@ Compute beta topcrashes, as if it was the release population.  (`-b` bucket file
 ```
 $ node ./topcrash.js -b ./buckets.js -f out/2016-01-bucket-counts.json -c beta -m release 2016-01
 ```
+
+Generate a static weight file.  Note that the counts file is specified separately for each of the src and dest bucket counts, and can be different.  This is so that different date ranges can be used for the count files.
+```
+$ node ./weight.js out/2016-01-bucket-counts.json release out/2016-01-bucket-counts.json beta beta-as-release.json
+```
+
+Use a static weight file for topcrashes.
+```
+$ node ./topcrash.js -b ./buckets.js -f out/2016-01-bucket-counts.json -c beta -w beta-as-release.json 2016-01
+```
+

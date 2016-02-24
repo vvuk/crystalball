@@ -96,6 +96,8 @@ if (require.main == module) {
     // the channel to use as a population map; e.g. channel beta, mapchannel release to show beta
     // topcrashes as if they were happening on release
     { name: 'mapchannel', alias: 'm', type: String },
+    // weight file, to use instead of mapchannel
+    { name: 'weights', alias: 'w', type: String },
     { name: 'verbose', alias: 'v', type: Boolean },
     { name: 'src', ailas: 's', type: String, multiple: true, defaultOption: true }
   ]);
@@ -120,10 +122,15 @@ if (require.main == module) {
     buckets = require(bucketModule).buckets;
 
     let weightsByName = null;
+    let weightData = null;
     if (opts['bucketcounts'] && opts['mapchannel']) {
       let bucketCountData = jsonfile.readFileSync(opts['bucketcounts']);
-      let weightData = weight.makeWeights(bucketCountData, opts['mapchannel'], opts['channel']);
+      weightData = weight.makeWeights(bucketCountData, opts['mapchannel'], bucketCountData, opts['channel']);
+    } else if (opts['bucketcounts'] && opts['weights']) {
+      weightData = jsonfile.readFileSync(opts['weights']);
+    }
 
+    if (weightData) {
       weightsByName = {};
       for (let w of weightData) {
         weightsByName[w['name']] = w['weight'];
