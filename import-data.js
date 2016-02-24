@@ -171,12 +171,44 @@ loadDataSuperSearchURL(ssurl, offset, outputStream)
   return outputStream;
 }
 
+function pad2(k) {
+  if (k < 10) return "0" + k;
+  return "" + k;
+}
+
 function
 expandDateString(datearg)
 {
   let datestrings = [];
-  let m = datearg.match(/^([0-9][0-9][0-9][0-9])-([0-9][0-9])(-([0-9][0-9]))?$/);
-  if (m[4]) {
+  let m;
+
+  m = datearg.match(/^([0-9][0-9][0-9][0-9])-([0-9][0-9])(-([0-9][0-9]))?(\:([0-9][0-9][0-9][0-9])-([0-9][0-9])(-([0-9][0-9]))?)?$/);
+  if (m[5]) {
+    // a range was given
+    let starty = parseInt(m[1], 10);
+    let startm = parseInt(m[2], 10);
+    let startd = m[4] ? parseInt(m[4], 10) : 1;
+    let endy = parseInt(m[6], 10);
+    let endm = parseInt(m[7], 10);
+    let endd = m[9];
+
+    let d = new Date(starty + "-" + pad2(startm) + "-" + pad2(startd) + " PST");
+    let endDate;
+    if (endd) {
+      endDate = new Date(endy + "-" + pad2(endm) + "-" + pad2(endd) + " PST");
+      endDate.setDate(endDate.getDate() + 1);
+    } else {
+      endDate = new Date(endy + "-" + pad2(endm) + "-01 PST");
+      endDate.setMonth(endDate.getMonth() + 1);
+    }
+
+    while (d < endDate) {
+      datestrings.push(d.getFullYear() + "-" +
+                       pad2(d.getMonth()+1) + "-" +
+                       pad2(d.getDate()));
+      d.setDate(d.getDate() + 1);
+    }
+  } else if (m[4]) {
     // a specific day was given
     datestrings.push(datearg);
   } else {
@@ -185,8 +217,8 @@ expandDateString(datearg)
     let startMonth = d.getMonth();
     while (d.getMonth() == startMonth) {
       datestrings.push(d.getFullYear() + "-" +
-                       (d.getMonth() < 9 ? "0" : "") + (d.getMonth()+1) + "-" +
-                       (d.getDate() < 10 ? "0" : "") + d.getDate());
+                       pad2(d.getMonth()+1) + "-" +
+                       pad2(d.getDate()));
       d.setDate(d.getDate() + 1);
     }
   }
@@ -333,7 +365,8 @@ function readNextStream() {
 function loadAllData(dataSources, destStream, cacheDirArg) {
   args = [];
   for (let arg of dataSources) {
-    if (arg.match(/^[0-9][0-9][0-9][0-9]-[0-9][0-9](-[0-9][0-9])?$/)) {
+    if (arg.match(/^[0-9][0-9][0-9][0-9]-[0-9][0-9](-[0-9][0-9])?$/) ||
+        arg.match(/^[0-9][0-9][0-9][0-9]-[0-9][0-9](-[0-9][0-9])?\:[0-9][0-9][0-9][0-9]-[0-9][0-9](-[0-9][0-9])?$/)) {
       args = args.concat(expandDateString(arg));
     } else {
       args.push(arg);
