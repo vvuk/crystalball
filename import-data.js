@@ -392,7 +392,8 @@ exports.loadAllData = loadAllData;
 if (require.main === module) {
   let k = 0;
   let testSink = es.mapSync(function (d) {
-                   if (k == 2) console.log(d);
+                   if (d['channel'] == 'beta')
+                     console.log(d);
                    k++;
                  });
   testSink.on('end', function() { console.log("Sinkstream end"); });

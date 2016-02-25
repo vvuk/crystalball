@@ -8,36 +8,21 @@ const cluster = require('cluster');
 
 let buckets = null;
 
-function doQueries(recs, topCrashes, channel)
+function doQueries(recs, topCrashes)
 {
   if (buckets) {
     for (let bucket of buckets) {
       let matched = recs.filter(bucket._sifter);
       for (let m of matched) {
-        if (channel && m['channel'] != channel)
-          continue;
-
         let w = bucket._weight;
         let sig = m['signature'];
-
-        if (sig in topCrashes) {
-          topCrashes[sig] += w;
-        } else {
-          topCrashes[sig] = w;
-        }
+        topCrashes[sig] = (topCrashes[sig] || 0) + w;
       }
     }
   } else {
     for (let rec of recs) {
-      if (channel && rec['channel'] != channel)
-        continue;
-
       let sig = rec['signature'];
-      if (sig in topCrashes) {
-        topCrashes[sig] += 1;
-      } else {
-        topCrashes[sig] = 1;
-      }
+      topCrashes[sig] = (topCrashes[sig] || 0) + 1;
     }
   }
 }
@@ -53,14 +38,14 @@ function printReport(topCrashes, numCrashes)
     return b.count - a.count;
   });
 
-  for (let i = 0; i < numCrashes; ++i) {
+  for (let i = 0; i < Math.min(numCrashes, crashArray.length); ++i) {
     console.log(crashArray[i].count.toFixed(2), crashArray[i].sig);
   }
 }
 
 const NUM_RECORDS = 5000;
 
-function doTopCrashes(src, channel, endCallback)
+function doTopCrashes(src, endCallback)
 {
   let recordCount = 0;
   let records = [];
@@ -69,14 +54,14 @@ function doTopCrashes(src, channel, endCallback)
   let handlingStream = es.mapSync(
     function (d) {
       if (recordCount > 0 && (recordCount % NUM_RECORDS) == 0) {
-        doQueries(records, topCrashes, channel);
+        doQueries(records, topCrashes);
         records = [];
       }
       records.push(d);
       recordCount++;
   });
   handlingStream.on('end', function() {
-    doQueries(records, topCrashes, channel);
+    doQueries(records, topCrashes);
     endCallback(topCrashes);
   });
 
@@ -94,19 +79,20 @@ function mergeResults(results, mergedResults)
   }
 }
 
-function configureBucketAndWeights(bucketModule, bucketCounts, channel, mapChannel, weightFile)
+function configureBucketAndWeights(bucketModule, bucketCounts, channel, mapChannel, weightFile, firefoxMajorVersion)
 {
-  if (!bucketModule)
-    return;
-
-  buckets = require(bucketModule).buckets;
+  if (bucketModule) {
+    buckets = require(bucketModule).buckets;
+  } else {
+    buckets = [ { name: "All", query: {} } ]
+  }
 
   let weightsByName = null;
   let weightData = null;
   if (bucketCounts && mapChannel) {
     let bucketCountData = jsonfile.readFileSync(bucketCounts);
     weightData = weight.makeWeights(bucketCountData, mapChannel, bucketCountData, channel);
-  } else if (bucketCounts && weightFile) {
+  } else if (weightFile) {
     weightData = jsonfile.readFileSync(weightFile);
   }
 
@@ -114,16 +100,18 @@ function configureBucketAndWeights(bucketModule, bucketCounts, channel, mapChann
     weightsByName = {};
     for (let w of weightData) {
       weightsByName[w['name']] = w['weight'];
-      if (verbose) {
-        console.log("Weight", w.weight.toFixed(3), w.name);
-      }
     }
   }
 
   for (let bucket of buckets) {
-    if (!bucket._sifter) {
-      bucket._sifter = sift(bucket.query);
+    if (channel) {
+      bucket.query["channel"] = channel;
     }
+    if (firefoxMajorVersion) {
+      bucket.query["v_v0"] = firefoxMajorVersion;
+    }
+
+    bucket._sifter = sift(bucket.query);
     if (weightsByName) {
       if (!(bucket['name'] in weightsByName)) {
         throw new Error("Can't find weight for bucket " + bucket['name']);
@@ -150,13 +138,13 @@ if (require.main == module && cluster.isMaster) {
     // weight file, to use instead of mapchannel
     { name: 'weights', alias: 'w', type: String },
     { name: 'verbose', alias: 'v', type: Boolean },
+    { name: 'firefox', alias: 'r', type: Number },
     { name: 'num', alias: 'n', type: Number },
     { name: 'src', ailas: 's', type: String, multiple: true, defaultOption: true }
   ]);
 
   const opts = cli.parse();
   let args = opts["src"];
-  let channelSelector = opts["channel"];
   let verbose = opts["verbose"];
   let numCrashes = opts["num"] || 25;
 
@@ -186,7 +174,7 @@ if (require.main == module && cluster.isMaster) {
   // callback from children when data result is available
   function dataResultHandler(msg) {
     if (msg.cmd == "processResult") {
-      console.log("Got result for", msg.src, "still waiting for", numResultsOutstanding-1);
+      console.log("Got result for " + msg.src + ", waiting on " + (numResultsOutstanding-1) + " more");
       mergeResults(msg.result, gTopCrashes);
 
       // Are there still more?
@@ -201,7 +189,8 @@ if (require.main == module && cluster.isMaster) {
     }
   }
 
-  configureBucketAndWeights(bucketModule, opts['bucketcounts'], opts['channel'], opts['mapchannel'], opts['weights']);
+  configureBucketAndWeights(bucketModule, opts['bucketcounts'], opts['channel'], opts['mapchannel'], opts['weights'],
+                           opts["firefox"]);
 
   // set up our worker cluster, based on the number of CPUs
   const numWorkers = require('os').cpus().length;
@@ -215,19 +204,16 @@ if (require.main == module && cluster.isMaster) {
     dispatchNextWorkItem(w.id);
   }
 } else if (cluster.isWorker) {
-  let channelSelector = null;
-
   process.on('message', function (msg) {
     if (msg.cmd == "configure") {
-      channelSelector = msg.opts['channel'];
       configureBucketAndWeights(msg.buckets, msg.opts['bucketcounts'], msg.opts['channel'],
-                                msg.opts['mapchannel'], msg.opts['weights']);
+                                msg.opts['mapchannel'], msg.opts['weights'], msg.opts['firefox']);
       return;
     }
 
     if (msg.cmd == "processData") {
       //console.log("processing", msg.src);
-      doTopCrashes(msg.src, channelSelector, function (results) {
+      doTopCrashes(msg.src, function (results) {
         process.send({ cmd: 'processResult', workerId: cluster.worker.id, src: msg.src, result: results });
       });
       return;

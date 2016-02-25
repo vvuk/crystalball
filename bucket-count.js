@@ -156,22 +156,22 @@ function mergeResults(result, mergedResults)
 {
   // merge result into mergedResults
   for (let channel in result) {
-    if (!(channel in mergedResults)) {
-      // doesn't exist, just take it
-      mergedResults[channel] = result[channel];
-    } else {
+    if (channel in mergedResults) {
       // merge
       let data = mergedResults[channel];
       let newData = result[channel];
       data.totalCount += newData.totalCount;
       data.matchedCount += newData.matchedCount;
-      for (let bucketName in newData.buckets) {
-        if (!(bucketName in data.buckets)) {
-          data.buckets[bucketName] = newData.buckets[bucketName];
+      for (let bucketName in newData.bucketCounts) {
+        if (bucketName in data.bucketCounts) {
+          data.bucketCounts[bucketName].count += newData.bucketCounts[bucketName].count;
         } else {
-          data.buckets[bucketName].count += newData.buckets[bucketName].count;
+          data.bucketCounts[bucketName] = { count: newData.bucketCounts[bucketName].count };
         }
       }
+    } else {
+      // doesn't exist, just take it
+      mergedResults[channel] = result[channel];
     }
   }
 }
@@ -190,6 +190,9 @@ if (require.main == module && cluster.isMaster) {
   let outFile = opts["out"];
   let outFileUpdate = opts["update"];
   let verbose = opts["verbose"];
+
+  if (!outFile)
+    verbose = true;
 
   let bucketModule = opts["buckets"];
   if (bucketModule) {
@@ -220,7 +223,7 @@ if (require.main == module && cluster.isMaster) {
   // callback from children when data result is available
   function dataResultHandler(msg) {
     if (msg.cmd == "processResult") {
-      console.log("Got result for", msg.src, "still waiting for", numResultsOutstanding-1);
+      console.log("Got result for " + msg.src + ", waiting on " + (numResultsOutstanding-1) + " more");
       mergeResults(msg.result, gBucketResultsByChannel);
 
       // Are there still more?
