@@ -4,19 +4,17 @@ const sift = require('sift');
 const es = require('event-stream');
 const cmdline = require('command-line-args');
 const jsonfile = require('jsonfile');
-const weight = require('./weight.js');
+const cluster = require('cluster');
 
-let topCrashes = {};
 let buckets = null;
-let channelSelector = null;
-let verbose = false;
 
-function doQueries(recs) {
+function doQueries(recs, topCrashes, channel)
+{
   if (buckets) {
     for (let bucket of buckets) {
       let matched = recs.filter(bucket._sifter);
       for (let m of matched) {
-        if (channelSelector && m['channel'] != channelSelector)
+        if (channel && m['channel'] != channel)
           continue;
 
         let w = bucket._weight;
@@ -29,30 +27,23 @@ function doQueries(recs) {
         }
       }
     }
-  }
-
-  for (let rec of recs) {
-    if (channelSelector && rec['channel'] != channelSelector)
-      continue;
-
-    let sig = rec['signature'];
-    let w = rec._weight;
-    if (buckets) {
-      if (!w)
+  } else {
+    for (let rec of recs) {
+      if (channel && rec['channel'] != channel)
         continue;
-    } else {
-      w = 1;
-    }
 
-    if (sig in topCrashes) {
-      topCrashes[sig] += w;
-    } else {
-      topCrashes[sig] = w;
+      let sig = rec['signature'];
+      if (sig in topCrashes) {
+        topCrashes[sig] += 1;
+      } else {
+        topCrashes[sig] = 1;
+      }
     }
   }
 }
 
-function printReport() {
+function printReport(topCrashes, numCrashes)
+{
   let crashArray = [];
   for (let sig in topCrashes) {
     crashArray.push({"sig": sig, "count": topCrashes[sig]});
@@ -62,30 +53,90 @@ function printReport() {
     return b.count - a.count;
   });
 
-  for (let i = 0; i < 15; ++i) {
+  for (let i = 0; i < numCrashes; ++i) {
     console.log(crashArray[i].count.toFixed(2), crashArray[i].sig);
   }
 }
 
-let recordCount = 0;
-let records = [];
 const NUM_RECORDS = 5000;
 
-let handlingStream = es.mapSync(
-  function (d) {
-    if (recordCount > 0 && (recordCount % NUM_RECORDS) == 0) {
-      doQueries(records);
-      records = [];
-    }
-    records.push(d);
-    recordCount++;
-  });
-handlingStream.on('end', function() {
-  doQueries(records);
-  printReport();
-});
+function doTopCrashes(src, channel, endCallback)
+{
+  let recordCount = 0;
+  let records = [];
+  let topCrashes = {};
 
-if (require.main == module) {
+  let handlingStream = es.mapSync(
+    function (d) {
+      if (recordCount > 0 && (recordCount % NUM_RECORDS) == 0) {
+        doQueries(records, topCrashes, channel);
+        records = [];
+      }
+      records.push(d);
+      recordCount++;
+  });
+  handlingStream.on('end', function() {
+    doQueries(records, topCrashes, channel);
+    endCallback(topCrashes);
+  });
+
+  importData.loadAllData([ src ], handlingStream);
+}
+
+function mergeResults(results, mergedResults)
+{
+  for (let crashSig in results) {
+    if (crashSig in mergedResults) {
+      mergedResults[crashSig] += results[crashSig];
+    } else {
+      mergedResults[crashSig] = results[crashSig];
+    }
+  }
+}
+
+function configureBucketAndWeights(bucketModule, bucketCounts, channel, mapChannel, weightFile)
+{
+  if (!bucketModule)
+    return;
+
+  buckets = require(bucketModule).buckets;
+
+  let weightsByName = null;
+  let weightData = null;
+  if (bucketCounts && mapChannel) {
+    let bucketCountData = jsonfile.readFileSync(bucketCounts);
+    weightData = weight.makeWeights(bucketCountData, mapChannel, bucketCountData, channel);
+  } else if (bucketCounts && weightFile) {
+    weightData = jsonfile.readFileSync(weightFile);
+  }
+
+  if (weightData) {
+    weightsByName = {};
+    for (let w of weightData) {
+      weightsByName[w['name']] = w['weight'];
+      if (verbose) {
+        console.log("Weight", w.weight.toFixed(3), w.name);
+      }
+    }
+  }
+
+  for (let bucket of buckets) {
+    if (!bucket._sifter) {
+      bucket._sifter = sift(bucket.query);
+    }
+    if (weightsByName) {
+      if (!(bucket['name'] in weightsByName)) {
+        throw new Error("Can't find weight for bucket " + bucket['name']);
+      }
+
+      bucket._weight = weightsByName[bucket['name']];
+    } else {
+      bucket._weight = 1;
+    }
+  }
+}
+
+if (require.main == module && cluster.isMaster) {
   let cli = cmdline([
     // the bucket module
     { name: 'buckets', alias: 'b', type: String },
@@ -99,13 +150,15 @@ if (require.main == module) {
     // weight file, to use instead of mapchannel
     { name: 'weights', alias: 'w', type: String },
     { name: 'verbose', alias: 'v', type: Boolean },
+    { name: 'num', alias: 'n', type: Number },
     { name: 'src', ailas: 's', type: String, multiple: true, defaultOption: true }
   ]);
 
   const opts = cli.parse();
   let args = opts["src"];
-  channelSelector = opts["channel"];
-  verbose = opts["verbose"];
+  let channelSelector = opts["channel"];
+  let verbose = opts["verbose"];
+  let numCrashes = opts["num"] || 25;
 
   let bucketModule = opts["buckets"];
   if (bucketModule) {
@@ -115,47 +168,71 @@ if (require.main == module) {
   }
 
   if (!args || args.length == 0) {
-    args = ["2016-01-01"];
+    console.error("Must specify some dates or files");
+    process.exit(1);
   }
 
-  if (bucketModule) {
-    buckets = require(bucketModule).buckets;
+  let workItems = importData.expandSourceArgs(args);
+  let numResultsOutstanding = workItems.length;
+  let gTopCrashes = {};
 
-    let weightsByName = null;
-    let weightData = null;
-    if (opts['bucketcounts'] && opts['mapchannel']) {
-      let bucketCountData = jsonfile.readFileSync(opts['bucketcounts']);
-      weightData = weight.makeWeights(bucketCountData, opts['mapchannel'], bucketCountData, opts['channel']);
-    } else if (opts['bucketcounts'] && opts['weights']) {
-      weightData = jsonfile.readFileSync(opts['weights']);
-    }
+  function dispatchNextWorkItem(workerId) {
+    let src = workItems.shift();
+    if (!src)
+      return;
+    cluster.workers[workerId].send({ cmd: "processData", src: src });
+  }
 
-    if (weightData) {
-      weightsByName = {};
-      for (let w of weightData) {
-        weightsByName[w['name']] = w['weight'];
-        if (verbose) {
-          console.log("Weight", w.weight.toFixed(3), w.name);
-        }
+  // callback from children when data result is available
+  function dataResultHandler(msg) {
+    if (msg.cmd == "processResult") {
+      console.log("Got result for", msg.src, "still waiting for", numResultsOutstanding-1);
+      mergeResults(msg.result, gTopCrashes);
+
+      // Are there still more?
+      if (--numResultsOutstanding > 0) {
+        dispatchNextWorkItem(msg.workerId);
+        return;
       }
-    }
 
-    for (let bucket of buckets) {
-      if (!bucket._sifter) {
-        bucket._sifter = sift(bucket.query);
-      }
-      if (weightsByName) {
-        if (!(bucket['name'] in weightsByName)) {
-          throw new Error("Can't find weight for bucket " + bucket['name']);
-        }
+      printReport(gTopCrashes, numCrashes);
 
-        bucket._weight = weightsByName[bucket['name']];
-      } else {
-        bucket._weight = 1;
-      }
+      cluster.disconnect();
     }
   }
 
-  importData.loadAllData(args, handlingStream);
+  configureBucketAndWeights(bucketModule, opts['bucketcounts'], opts['channel'], opts['mapchannel'], opts['weights']);
+
+  // set up our worker cluster, based on the number of CPUs
+  const numWorkers = require('os').cpus().length;
+  let workers = [];
+  for (let i = 0; i < numWorkers; ++i) {
+    let w = cluster.fork();
+    w.on('message', dataResultHandler);
+    w.send({ cmd: "configure", buckets: bucketModule, opts: opts });
+
+    // give it a work item
+    dispatchNextWorkItem(w.id);
+  }
+} else if (cluster.isWorker) {
+  let channelSelector = null;
+
+  process.on('message', function (msg) {
+    if (msg.cmd == "configure") {
+      channelSelector = msg.opts['channel'];
+      configureBucketAndWeights(msg.buckets, msg.opts['bucketcounts'], msg.opts['channel'],
+                                msg.opts['mapchannel'], msg.opts['weights']);
+      return;
+    }
+
+    if (msg.cmd == "processData") {
+      //console.log("processing", msg.src);
+      doTopCrashes(msg.src, channelSelector, function (results) {
+        process.send({ cmd: 'processResult', workerId: cluster.worker.id, src: msg.src, result: results });
+      });
+      return;
+    }
+  });
 }
+
 

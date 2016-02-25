@@ -362,24 +362,27 @@ function readNextStream() {
   }
 }
 
-function loadAllData(dataSources, destStream, cacheDirArg) {
-  args = [];
+function expandSourceArgs(dataSources) {
+  let expandedArgs = [];
   for (let arg of dataSources) {
     if (arg.match(/^[0-9][0-9][0-9][0-9]-[0-9][0-9](-[0-9][0-9])?$/) ||
         arg.match(/^[0-9][0-9][0-9][0-9]-[0-9][0-9](-[0-9][0-9])?\:[0-9][0-9][0-9][0-9]-[0-9][0-9](-[0-9][0-9])?$/)) {
-      args = args.concat(expandDateString(arg));
+      expandedArgs = expandedArgs.concat(expandDateString(arg));
     } else {
-      args.push(arg);
+      expandedArgs.push(arg);
     }
   }
+  return expandedArgs;
+}
 
-  if (cacheDirArg) {
-    cacheDir = cacheDirArg;
-  }
+function loadAllData(dataSources, destStream, cacheDirArg) {
+  args = expandSourceArgs(dataSources);
   sinkStream = destStream;
+  cacheDir = cacheDirArg || cacheDir;
   readNextStream();
 }
 
+exports.expandSourceArgs = expandSourceArgs;
 exports.loadAllData = loadAllData;
 
 /*
