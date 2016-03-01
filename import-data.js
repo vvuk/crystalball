@@ -236,14 +236,16 @@ loadDataCSVQueryDate(datearg, outputStream)
   }
 
   if (cacheDir) {
-    let path = cacheDir + "/" + datearg + ".csv.gz";
-    try {
-      fs.accessSync(path);
-      // exists
-      let s = fs.createReadStream(path);
-      console.log(reqOpts.url + " (cached)");
-      return loadDataCSVStream(s.pipe(zlib.createGunzip()));
-    } catch (e) {
+    let paths = [ cacheDir + "/" + datearg + ".csv.gz", cacheDir + "/" + (datearg.replace(/-/g, "")) + "-pub-crashdata.csv.gz" ];
+    for (let path of paths) {
+      try {
+        fs.accessSync(path);
+        // exists
+        let s = fs.createReadStream(path);
+        console.log(datearg + " (cached -- " + path + ")");
+        return loadDataCSVStream(s.pipe(zlib.createGunzip()));
+      } catch (e) {
+      }
     }
   }
 
