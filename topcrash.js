@@ -5,24 +5,20 @@ const es = require('event-stream');
 const cmdline = require('command-line-args');
 const jsonfile = require('jsonfile');
 const cluster = require('cluster');
+const printf = require('printf');
 
 let buckets = null;
+let hasBuckets = false;
 
-function doQueries(recs, topCrashes)
+function doQueries(recs, topCrashes, unweightedTopCrashes)
 {
-  if (buckets) {
-    for (let bucket of buckets) {
-      let matched = recs.filter(bucket._sifter);
-      for (let m of matched) {
-        let w = bucket._weight;
-        let sig = m['signature'];
-        topCrashes[sig] = (topCrashes[sig] || 0) + w;
-      }
-    }
-  } else {
-    for (let rec of recs) {
-      let sig = rec['signature'];
-      topCrashes[sig] = (topCrashes[sig] || 0) + 1;
+  for (let bucket of buckets) {
+    let matched = recs.filter(bucket._sifter);
+    for (let m of matched) {
+      let w = bucket._weight;
+      let sig = m['signature'];
+      topCrashes[sig] = (topCrashes[sig] || 0) + w;
+      unweightedTopCrashes[sig] = (unweightedTopCrashes[sig] || 0) + 1;
     }
   }
 }
@@ -39,7 +35,7 @@ function printReport(topCrashes, numCrashes)
   });
 
   for (let i = 0; i < Math.min(numCrashes, crashArray.length); ++i) {
-    console.log(crashArray[i].count.toFixed(2), crashArray[i].sig);
+    printf(process.stdout, "% 9.2f  %s\n", crashArray[i].count, crashArray[i].sig);
   }
 }
 
@@ -50,31 +46,38 @@ function doTopCrashes(src, endCallback)
   let recordCount = 0;
   let records = [];
   let topCrashes = {};
+  let unweightedTopCrashes = {};
 
   let handlingStream = es.mapSync(
     function (d) {
       if (recordCount > 0 && (recordCount % NUM_RECORDS) == 0) {
-        doQueries(records, topCrashes);
+        doQueries(records, topCrashes, unweightedTopCrashes);
         records = [];
       }
       records.push(d);
       recordCount++;
   });
   handlingStream.on('end', function() {
-    doQueries(records, topCrashes);
-    endCallback(topCrashes);
+    doQueries(records, topCrashes, unweightedTopCrashes);
+    endCallback([topCrashes, unweightedTopCrashes]);
   });
 
   importData.loadAllData([ src ], handlingStream);
 }
 
-function mergeResults(results, mergedResults)
+function mergeResults(results, mergedResults, unweightedMergedResults)
 {
-  for (let crashSig in results) {
-    if (crashSig in mergedResults) {
-      mergedResults[crashSig] += results[crashSig];
-    } else {
-      mergedResults[crashSig] = results[crashSig];
+  for (let k = 0; k < 2; ++k) {
+    if (!results[k])
+      continue;
+    let i = results[k];
+    let o = (k == 0) ? mergedResults : unweightedMergedResults;
+    for (let crashSig in i) {
+      if (crashSig in o) {
+        o[crashSig] += i[crashSig];
+      } else {
+        o[crashSig] = i[crashSig];
+      }
     }
   }
 }
@@ -83,8 +86,10 @@ function configureBucketAndWeights(bucketModule, bucketCounts, channel, mapChann
 {
   if (bucketModule) {
     buckets = require(bucketModule).buckets;
+    hasBuckets = true;
   } else {
-    buckets = [ { name: "All", query: {} } ]
+    // set up a dummy "All" bucket
+    buckets = [ { name: "All", query: {} } ];
   }
 
   let weightsByName = null;
@@ -163,6 +168,7 @@ if (require.main == module && cluster.isMaster) {
   let workItems = importData.expandSourceArgs(args);
   let numResultsOutstanding = workItems.length;
   let gTopCrashes = {};
+  let gUnweightedTopCrashes = {};
 
   function dispatchNextWorkItem(workerId) {
     let src = workItems.shift();
@@ -174,8 +180,8 @@ if (require.main == module && cluster.isMaster) {
   // callback from children when data result is available
   function dataResultHandler(msg) {
     if (msg.cmd == "processResult") {
-      console.log("Got result for " + msg.src + ", waiting on " + (numResultsOutstanding-1) + " more");
-      mergeResults(msg.result, gTopCrashes);
+      printf(process.stdout, "Got result for %s, waiting on %d more\n", msg.src, numResultsOutstanding-1);
+      mergeResults(msg.result, gTopCrashes, gUnweightedTopCrashes);
 
       // Are there still more?
       if (--numResultsOutstanding > 0) {
@@ -183,6 +189,11 @@ if (require.main == module && cluster.isMaster) {
         return;
       }
 
+      if (hasBuckets) {
+        printf(process.stdout, "==== Top Crashes (unweighted) ====\n");
+        printReport(gUnweightedTopCrashes, numCrashes);
+      }
+      printf(process.stdout, "==== Top Crashes %s====\n", hasBuckets ? "(weighted) " : "");
       printReport(gTopCrashes, numCrashes);
 
       cluster.disconnect();
