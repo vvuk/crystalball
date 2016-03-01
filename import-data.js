@@ -301,7 +301,12 @@ loadDataCSVStream(csvStream)
 
       try {
         doc['signature'] = r[col['signature']];
-        doc['uuid'] = r[col['crash_id']];
+        if (col['crash_id']) {
+          doc['uuid'] = r[col['crash_id']];
+        } else if (col['uuid_url']) {
+          let s = r[col['uuid_url']];
+          doc['uuid'] = s.substr(s.lastIndexOf("/") + 1);
+        }
         doc['build_id'] = r[col['build']];
 
         let osname = r[col['os_name']];
