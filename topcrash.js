@@ -18,11 +18,20 @@ function doQueries(recs, topCrashes, unweightedTopCrashes)
       let w = bucket._weight;
       let sig = m['signature'];
       if (!(sig in topCrashes)) {
-        topCrashes[sig] = { count: 0, sig: sig, lastSeen: new Date(0), lastUuid: m['uuid'] };
-        unweightedTopCrashes[sig] = { count: 0, sig: sig, lastSeen: new Date(0), lastUuid: m['uuid'] };
+        topCrashes[sig] = { count: 0, sig: sig, lastSeen: new Date(0), lastUuid: m['uuid'] , bucketCounts: {} };
+        unweightedTopCrashes[sig] = { count: 0, sig: sig, lastSeen: new Date(0), lastUuid: m['uuid'], bucketCounts: {} };
       }
+
       topCrashes[sig].count += w;
       unweightedTopCrashes[sig].count += 1;
+
+      if (!(bucket.name in topCrashes[sig].bucketCounts)) {
+        topCrashes[sig].bucketCounts[bucket.name] = { name: bucket.name, count: 0 };
+        unweightedTopCrashes[sig].bucketCounts[bucket.name] = { name: bucket.name, count: 0 };
+      }
+
+      topCrashes[sig].bucketCounts[bucket.name].count += w;
+      unweightedTopCrashes[sig].bucketCounts[bucket.name].count += 1;
 
       if (m['crash_date'] && m['crash_date'].getTime() > topCrashes[sig].lastSeen.getTime()) {
         topCrashes[sig].lastSeen = unweightedTopCrashes[sig].lastSeen =
@@ -34,20 +43,22 @@ function doQueries(recs, topCrashes, unweightedTopCrashes)
   }
 }
 
-function makeCrashArray(crashes)
+function makeSortedCountArray(src)
 {
-  if (!crashes)
+  if (!src)
     return null;
 
-  let crashArray = [];
-  for (let sig in crashes) {
-    crashArray.push(crashes[sig]);
+  let sortedArray = [];
+  for (let key in src) {
+    sortedArray.push(src[key]);
   }
-  crashArray.sort(function(a, b) {
+  sortedArray.sort(function(a, b) {
     return b.count - a.count;
   });
-  return crashArray;
+  return sortedArray;
 }
+
+const NUM_VERBOSE_BUCKETS = 5;
 
 function printCrashLine(deltaStr, index, crash, verbose)
 {
@@ -55,6 +66,7 @@ function printCrashLine(deltaStr, index, crash, verbose)
   let padstr = " ".repeat(deltaStr.length);
   printf(process.stdout, "%s%3d: %11.2f  %s\n", deltaStr, index, crash.count, crash.sig);
   if (verbose) {
+    let verbosePad = " ".repeat(deltaStr.length + 18);
     let ls = "??";
     if (crash.lastSeen) {
       // the object will have been serialized back from the worker threads -- and it will
@@ -63,16 +75,24 @@ function printCrashLine(deltaStr, index, crash, verbose)
       ls = d.toLocaleDateString("en-US",
                                 { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' });
     }
-    printf(process.stdout, "%s                  last crash at: %s, link: https://crash-stats.mozilla.com/report/index/%s\n",
-           padstr, ls, crash.lastUuid);
+    printf(process.stdout, "%s last crash at: %s, link: https://crash-stats.mozilla.com/report/index/%s\n",
+           verbosePad, ls, crash.lastUuid);
+    if (crash.bucketCounts) {
+      let arr = makeSortedCountArray(crash.bucketCounts);
+      printf(process.stdout, "%s top buckets:\n", verbosePad);
+      for (let b = 0; b < Math.min(arr.length, NUM_VERBOSE_BUCKETS); b++) {
+        let bucket = arr[b];
+        printf(process.stdout, "%s  %2d: %7d %s\n", verbosePad, b+1, bucket.count, bucket.name);
+      }
+    }
     printf(process.stdout, "\n");
   }
 }
 
 function printReport(topCrashes, unweightedTopCrashes, numCrashes, verbose)
 {
-  let wCrashArray = makeCrashArray(topCrashes);
-  let uCrashArray = makeCrashArray(unweightedTopCrashes);
+  let wCrashArray = makeSortedCountArray(topCrashes);
+  let uCrashArray = makeSortedCountArray(unweightedTopCrashes);
 
   if (uCrashArray) {
     // figure out the position change for each weighted crash
