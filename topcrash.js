@@ -12,6 +12,8 @@ let hasWeights = false;
 
 function doQueries(recs, topCrashes, unweightedTopCrashes)
 {
+  // NOTE: if you store more data here, make sure you also handle it
+  // in mergeResults below.
   for (let bucket of buckets) {
     let matched = recs.filter(bucket._sifter);
     for (let m of matched) {
@@ -43,6 +45,47 @@ function doQueries(recs, topCrashes, unweightedTopCrashes)
   }
 }
 
+function mergeResults(results, mergedResults, unweightedMergedResults)
+{
+  for (let k = 0; k < 2; ++k) {
+    if (!results[k])
+      continue;
+    let i = results[k];
+    let o = (k == 0) ? mergedResults : unweightedMergedResults;
+    for (let crashSig in i) {
+      if (!(crashSig in o)) {
+        o[crashSig] = { count: 0, sig: crashSig, lastSeen: new Date(0), lastUuid: null };
+      }
+
+      let ic = i[crashSig];
+      let oc = o[crashSig];
+
+      // make things into dates that are supposed to be dates
+      ic.lastSeen = new Date(ic.lastSeen);
+
+      oc.count += ic.count;
+      if (ic.lastSeen > oc.lastSeen) {
+        oc.lastSeen = ic.lastSeen;
+        oc.lastUuid = ic.lastUuid;
+      }
+
+      if ('bucketCounts' in ic) {
+        if (!('bucketCounts' in oc)) {
+          oc['bucketCounts'] = ic['bucketCounts'];
+        } else {
+          for (let bname in ic.bucketCounts) {
+            if (!(bname in oc.bucketCounts)) {
+              oc.bucketCounts[bname] = ic.bucketCounts[bname];
+            } else {
+              oc.bucketCounts[bname].count += ic.bucketCounts[bname].count;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 function makeSortedCountArray(src)
 {
   if (!src)
@@ -69,11 +112,8 @@ function printCrashLine(deltaStr, index, crash, verbose)
     let verbosePad = " ".repeat(deltaStr.length + 18);
     let ls = "??";
     if (crash.lastSeen) {
-      // the object will have been serialized back from the worker threads -- and it will
-      // likely arrive back as a string.
-      let d = (crash.lastSeen instanceof Date) ? crash.lastSeen : new Date(crash.lastSeen);
-      ls = d.toLocaleDateString("en-US",
-                                { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' });
+      ls = crash.lastSeen.toLocaleDateString("en-US",
+                                             { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' });
     }
     printf(process.stdout, "%s last crash at: %s, link: https://crash-stats.mozilla.com/report/index/%s\n",
            verbosePad, ls, crash.lastUuid);
@@ -160,23 +200,6 @@ function doTopCrashes(src, endCallback)
   });
 
   importData.loadAllData([ src ], handlingStream);
-}
-
-function mergeResults(results, mergedResults, unweightedMergedResults)
-{
-  for (let k = 0; k < 2; ++k) {
-    if (!results[k])
-      continue;
-    let i = results[k];
-    let o = (k == 0) ? mergedResults : unweightedMergedResults;
-    for (let crashSig in i) {
-      if (crashSig in o) {
-        o[crashSig] += i[crashSig];
-      } else {
-        o[crashSig] = i[crashSig];
-      }
-    }
-  }
 }
 
 function configureBucketAndWeights(bucketModule, bucketCounts, channel, mapChannel, weightFile, firefoxMajorVersion)
