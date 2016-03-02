@@ -8,7 +8,7 @@ const cluster = require('cluster');
 const printf = require('printf');
 
 let buckets = null;
-let hasBuckets = false;
+let hasWeights = false;
 
 function doQueries(recs, topCrashes, unweightedTopCrashes)
 {
@@ -23,19 +23,65 @@ function doQueries(recs, topCrashes, unweightedTopCrashes)
   }
 }
 
-function printReport(topCrashes, numCrashes)
+function makeCrashArray(crashes)
 {
-  let crashArray = [];
-  for (let sig in topCrashes) {
-    crashArray.push({"sig": sig, "count": topCrashes[sig]});
-  }
+  if (!crashes)
+    return null;
 
+  let crashArray = [];
+  for (let sig in crashes) {
+    crashArray.push({"sig": sig, "count": crashes[sig]});
+  }
   crashArray.sort(function(a, b) {
     return b.count - a.count;
   });
+  return crashArray;
+}
 
-  for (let i = 0; i < Math.min(numCrashes, crashArray.length); ++i) {
-    printf(process.stdout, "% 12.2f  %s\n", crashArray[i].count, crashArray[i].sig);
+function printReport(topCrashes, unweightedTopCrashes, numCrashes)
+{
+  let wCrashArray = makeCrashArray(topCrashes);
+  let uCrashArray = makeCrashArray(unweightedTopCrashes);
+
+  if (uCrashArray) {
+    // figure out the position change for each weighted crash
+    for (let i = 0; i < Math.min(numCrashes, wCrashArray.length); ++i) {
+      let uIndex = 0;
+      while (uIndex < uCrashArray.length) {
+        if (uCrashArray[uIndex].sig == wCrashArray[i].sig)
+          break;
+        uIndex++;
+      }
+      if (uIndex == uCrashArray.length) {
+        console.error("Crash with signature '" + wCrashArray[i].sig + "' in weighted list, but not in unweighted?!");
+      }
+      wCrashArray[i]['change'] = uIndex - i;
+    }
+
+    printf(process.stdout, "\n==== Top Crashes (unweighted) ====\n");
+    for (let i = 0; i < Math.min(numCrashes, uCrashArray.length); ++i) {
+      printf(process.stdout, "%3d: %11.2f  %s\n", i+1, uCrashArray[i].count, uCrashArray[i].sig);
+    }
+
+    printf(process.stdout, "\n==== Top Crashes (weighted) ====\n");
+    for (let i = 0; i < Math.min(numCrashes, wCrashArray.length); ++i) {
+      let c = wCrashArray[i];
+      let deltaStr = "      ";
+      if (c.change) {
+        let sign = c.change < 0 ? "-" : "+";
+        let abs = Math.abs(c.change);
+        deltaStr = printf("(%s%3d)", sign, abs);
+      }
+
+      printf(process.stdout, "%s%3d: %11.2f  %s\n", deltaStr, i+1, c.count, c.sig);
+    }
+
+
+  } else {
+    printf(process.stdout, "\n==== Top Crashes ====\n");
+    for (let i = 0; i < Math.min(numCrashes, wCrashArray.length); ++i) {
+      printf(process.stdout, "%3d: %11.2f  %s\n", i+1, wCrashArray[i].count, wCrashArray[i].sig);
+    }
   }
 }
 
@@ -86,7 +132,6 @@ function configureBucketAndWeights(bucketModule, bucketCounts, channel, mapChann
 {
   if (bucketModule) {
     buckets = require(bucketModule).buckets;
-    hasBuckets = true;
   } else {
     // set up a dummy "All" bucket
     buckets = [ { name: "All", query: {} } ];
@@ -102,6 +147,7 @@ function configureBucketAndWeights(bucketModule, bucketCounts, channel, mapChann
   }
 
   if (weightData) {
+    hasWeights = true;
     weightsByName = {};
     for (let w of weightData) {
       weightsByName[w['name']] = w['weight'];
@@ -189,12 +235,7 @@ if (require.main == module && cluster.isMaster) {
         return;
       }
 
-      if (hasBuckets) {
-        printf(process.stdout, "==== Top Crashes (unweighted) ====\n");
-        printReport(gUnweightedTopCrashes, numCrashes);
-      }
-      printf(process.stdout, "==== Top Crashes %s====\n", hasBuckets ? "(weighted) " : "");
-      printReport(gTopCrashes, numCrashes);
+      printReport(gTopCrashes, hasWeights ? gUnweightedTopCrashes : null, numCrashes);
 
       cluster.disconnect();
     }
