@@ -35,7 +35,7 @@ function printReport(topCrashes, numCrashes)
   });
 
   for (let i = 0; i < Math.min(numCrashes, crashArray.length); ++i) {
-    printf(process.stdout, "% 9.2f  %s\n", crashArray[i].count, crashArray[i].sig);
+    printf(process.stdout, "% 12.2f  %s\n", crashArray[i].count, crashArray[i].sig);
   }
 }
 
