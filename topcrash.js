@@ -17,8 +17,19 @@ function doQueries(recs, topCrashes, unweightedTopCrashes)
     for (let m of matched) {
       let w = bucket._weight;
       let sig = m['signature'];
-      topCrashes[sig] = (topCrashes[sig] || 0) + w;
-      unweightedTopCrashes[sig] = (unweightedTopCrashes[sig] || 0) + 1;
+      if (!(sig in topCrashes)) {
+        topCrashes[sig] = { count: 0, sig: sig, lastSeen: new Date(0), lastUuid: m['uuid'] };
+        unweightedTopCrashes[sig] = { count: 0, sig: sig, lastSeen: new Date(0), lastUuid: m['uuid'] };
+      }
+      topCrashes[sig].count += w;
+      unweightedTopCrashes[sig].count += 1;
+
+      if (m['crash_date'] && m['crash_date'].getTime() > topCrashes[sig].lastSeen.getTime()) {
+        topCrashes[sig].lastSeen = unweightedTopCrashes[sig].lastSeen =
+          m['crash_date'];
+        topCrashes[sig].lastUuid = unweightedTopCrashes[sig].lastUuid =
+          m['uuid'];
+      }
     }
   }
 }
@@ -30,7 +41,7 @@ function makeCrashArray(crashes)
 
   let crashArray = [];
   for (let sig in crashes) {
-    crashArray.push({"sig": sig, "count": crashes[sig]});
+    crashArray.push(crashes[sig]);
   }
   crashArray.sort(function(a, b) {
     return b.count - a.count;
@@ -38,7 +49,27 @@ function makeCrashArray(crashes)
   return crashArray;
 }
 
-function printReport(topCrashes, unweightedTopCrashes, numCrashes)
+function printCrashLine(deltaStr, index, crash, verbose)
+{
+  deltaStr = deltaStr || "";
+  let padstr = " ".repeat(deltaStr.length);
+  printf(process.stdout, "%s%3d: %11.2f  %s\n", deltaStr, index, crash.count, crash.sig);
+  if (verbose) {
+    let ls = "??";
+    if (crash.lastSeen) {
+      // the object will have been serialized back from the worker threads -- and it will
+      // likely arrive back as a string.
+      let d = (crash.lastSeen instanceof Date) ? crash.lastSeen : new Date(crash.lastSeen);
+      ls = d.toLocaleDateString("en-US",
+                                { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' });
+    }
+    printf(process.stdout, "%s                  last crash at: %s, link: https://crash-stats.mozilla.com/report/index/%s\n",
+           padstr, ls, crash.lastUuid);
+    printf(process.stdout, "\n");
+  }
+}
+
+function printReport(topCrashes, unweightedTopCrashes, numCrashes, verbose)
 {
   let wCrashArray = makeCrashArray(topCrashes);
   let uCrashArray = makeCrashArray(unweightedTopCrashes);
@@ -60,7 +91,7 @@ function printReport(topCrashes, unweightedTopCrashes, numCrashes)
 
     printf(process.stdout, "\n==== Top Crashes (unweighted) ====\n");
     for (let i = 0; i < Math.min(numCrashes, uCrashArray.length); ++i) {
-      printf(process.stdout, "%3d: %11.2f  %s\n", i+1, uCrashArray[i].count, uCrashArray[i].sig);
+      printCrashLine(null, i+1, uCrashArray[i], verbose);
     }
 
     printf(process.stdout, "\n==== Top Crashes (weighted) ====\n");
@@ -73,14 +104,14 @@ function printReport(topCrashes, unweightedTopCrashes, numCrashes)
         deltaStr = printf("(%s%3d)", sign, abs);
       }
 
-      printf(process.stdout, "%s%3d: %11.2f  %s\n", deltaStr, i+1, c.count, c.sig);
+      printCrashLine(deltaStr, i+1, wCrashArray[i], verbose);
     }
 
 
   } else {
     printf(process.stdout, "\n==== Top Crashes ====\n");
     for (let i = 0; i < Math.min(numCrashes, wCrashArray.length); ++i) {
-      printf(process.stdout, "%3d: %11.2f  %s\n", i+1, wCrashArray[i].count, wCrashArray[i].sig);
+      printCrashLine(null, i+1, wCrashArray[i], verbose);
     }
   }
 }
@@ -235,7 +266,7 @@ if (require.main == module && cluster.isMaster) {
         return;
       }
 
-      printReport(gTopCrashes, hasWeights ? gUnweightedTopCrashes : null, numCrashes);
+      printReport(gTopCrashes, hasWeights ? gUnweightedTopCrashes : null, numCrashes, verbose);
 
       cluster.disconnect();
     }

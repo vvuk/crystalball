@@ -316,7 +316,14 @@ loadDataCSVStream(csvStream)
         doc['app_notes'] = r[col['app_notes']];
         parse_os_version_into(doc, osname, "pv", r[col['os_version']]);
         doc['version'] = r[col['version']];
-        doc['date'] = r[col['date_processed']].substr(0, 8);
+        let dstr = r[col['client_crash_date']];
+        if (!dstr) {
+          // we should really be getting the actual client crash date
+          dstr = r[col['date_processed']];
+        }
+        if (dstr) {
+          doc['crash_date'] = new Date(dstr.substr(0,4) + "-" + dstr.substr(4,2) + "-" + dstr.substr(6,2) + " " + dstr.substr(8,2) + ":" + dstr.substr(10,2) + " GMT");
+        }
         doc['channel'] = r[col['release_channel']];
 
         parse_version_into(doc, "v", r[col['version']]);
