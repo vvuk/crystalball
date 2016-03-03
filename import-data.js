@@ -270,6 +270,17 @@ loadDataCSV(csvfile)
   return loadDataCSVStream(csvStream);
 }
 
+function dateStringToDate(dstr)
+{
+  if (!dstr)
+    return null;
+  return new Date(dstr.substr(0,4) + "-" +
+                  dstr.substr(4,2) + "-" +
+                  dstr.substr(6,2) + " " +
+                  dstr.substr(8,2) + ":" +
+                  dstr.substr(10,2) + " GMT");
+}
+
 function
 loadDataCSVStream(csvStream)
 {
@@ -302,28 +313,22 @@ loadDataCSVStream(csvStream)
       let doc = {};
 
       try {
-        doc['signature'] = r[col['signature']];
-        if (col['crash_id']) {
+        let osname = r[col['os_name']];
+
+        if (col['crash_id']) {  // new crash_id uuid
           doc['uuid'] = r[col['crash_id']];
-        } else if (col['uuid_url']) {
+        } else if (col['uuid_url']) {  // old-style uuid_url
           let s = r[col['uuid_url']];
           doc['uuid'] = s.substr(s.lastIndexOf("/") + 1);
         }
+        doc['signature'] = r[col['signature']];
         doc['build_id'] = r[col['build']];
-
-        let osname = r[col['os_name']];
         doc['platform'] = osname;
         doc['app_notes'] = r[col['app_notes']];
-        parse_os_version_into(doc, osname, "pv", r[col['os_version']]);
         doc['version'] = r[col['version']];
-        let dstr = r[col['client_crash_date']];
-        if (!dstr) {
-          // we should really be getting the actual client crash date
-          dstr = r[col['date_processed']];
-        }
-        if (dstr) {
-          doc['crash_date'] = new Date(dstr.substr(0,4) + "-" + dstr.substr(4,2) + "-" + dstr.substr(6,2) + " " + dstr.substr(8,2) + ":" + dstr.substr(10,2) + " GMT");
-        }
+        // we can only trust this date, as the client crash date, etc. all depend on
+        // the client having their clock properly set
+        doc['crash_date'] = dateStringToDate(r[col['date_processed']]);
         doc['channel'] = r[col['release_channel']];
 
         parse_version_into(doc, "v", r[col['version']]);
