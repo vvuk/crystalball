@@ -182,6 +182,7 @@ if (require.main == module && cluster.isMaster) {
     { name: 'update', alias: 'u', type: Boolean },
     { name: 'buckets', alias: 'b', type: String },
     { name: 'verbose', alias: 'v', type: Boolean },
+    { name: 'parallel', alias: 'j', type: Number },
     { name: 'in', ailas: 'i', type: String, multiple: true, defaultOption: true }
   ]);
 
@@ -243,7 +244,7 @@ if (require.main == module && cluster.isMaster) {
   }
 
   // set up our worker cluster, based on the number of CPUs
-  const numWorkers = require('os').cpus().length;
+  const numWorkers = opts['parallel'] || require('os').cpus().length;
   let workers = [];
   for (let i = 0; i < numWorkers; ++i) {
     let w = cluster.fork();

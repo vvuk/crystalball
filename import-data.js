@@ -411,7 +411,7 @@ exports.loadAllData = loadAllData;
 if (require.main === module) {
   let k = 0;
   let testSink = es.mapSync(function (d) {
-                   if (d['channel'] == 'beta')
+                   if ((k % 10000) == 0)
                      console.log(d);
                    k++;
                  });
